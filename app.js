@@ -36,6 +36,16 @@ const app = (() => {
         loadApiKey();
         setupSpeechRecognition();
         setupMicButton();
+        initializeConversation();
+    }
+
+    function initializeConversation() {
+        state.conversationHistory = [
+            {
+                role: 'system',
+                content: 'あなたはロボットを制御するアシスタントです。ユーザーの指示に従ってロボットを動かしてください。\n\n重要な注意事項：\n- 絵や図形を描く場合は、必ず最初にpen_downツールを使ってペンを下ろしてください\n- 描画が完了したら、必ずpen_upツールを使ってペンを上げてください\n- ペンを下ろさずに移動すると、線が描かれません'
+            }
+        ];
     }
 
     function loadApiKey() {
@@ -190,6 +200,51 @@ const app = (() => {
                     required: []
                 }
             }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'pen_up',
+                description: 'ロボットのペンを上げます',
+                parameters: {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'pen_down',
+                description: 'ロボットのペンを下げます',
+                parameters: {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'play_note',
+                description: 'ロボットから指定した周波数の音を指定した時間鳴らします',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        frequency: {
+                            type: 'number',
+                            description: '音の周波数（Hz）。デフォルトは440Hz（ラの音）'
+                        },
+                        duration: {
+                            type: 'number',
+                            description: '音を鳴らす時間（ミリ秒）。デフォルトは1000ms'
+                        }
+                    },
+                    required: []
+                }
+            }
         }
     ];
 
@@ -299,6 +354,33 @@ const app = (() => {
                 tool_call_id: toolCall.id,
                 content: `ロボットを${angle}度回転させました`
             });
+        } else if (toolCall.function.name === 'pen_up') {
+            await executeRobotPenUp();
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: 'ペンを上げました'
+            });
+        } else if (toolCall.function.name === 'pen_down') {
+            await executeRobotPenDown();
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: 'ペンを下げました'
+            });
+        } else if (toolCall.function.name === 'play_note') {
+            const args = JSON.parse(toolCall.function.arguments);
+            const frequency = args.frequency || 440;
+            const duration = args.duration || 1000;
+            await executeRobotPlayNote(frequency, duration);
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `${frequency}Hzの音を${duration}ms鳴らしました`
+            });
         } else {
             state.conversationHistory.push({
                 role: 'tool',
@@ -345,7 +427,7 @@ const app = (() => {
 
     function clearChat() {
         elements.chatContainer.innerHTML = '';
-        state.conversationHistory = [];
+        initializeConversation();
         setStatus('マイクボタンを押して話しかけてください');
     }
 
@@ -512,6 +594,36 @@ const app = (() => {
         return createRobotCommand(1, 12, packetId, (angle * 10) | 0);
     }
 
+    function setPenPosition(position, packetId) {
+        const arr = new Uint8Array(19);
+        arr[0] = 2; // Device ID: Marker/Eraser
+        arr[1] = 0; // Command ID: Set position
+        arr[2] = packetId & 0xFF;
+        arr[3] = position; // 0 = up, 1 = down
+        return arr;
+    }
+
+    function setSound(frequency, duration, packetId) {
+        const arr = new Uint8Array(19);
+        arr[0] = 5; // Device ID: Sound
+        arr[1] = 0; // Command ID: Play Note
+        arr[2] = packetId & 0xFF;
+
+        // Frequency: 32-bit (Byte 3-6)
+        const freqValue = frequency | 0;
+        arr[3] = (freqValue >> 24) & 0xFF;
+        arr[4] = (freqValue >> 16) & 0xFF;
+        arr[5] = (freqValue >> 8) & 0xFF;
+        arr[6] = freqValue & 0xFF;
+
+        // Duration: 16-bit (Byte 7-8)
+        const durValue = duration | 0;
+        arr[7] = (durValue >> 8) & 0xFF;
+        arr[8] = durValue & 0xFF;
+
+        return arr;
+    }
+
     async function sendRobotCommand(commandData, key) {
         if (!state.txCharacteristic) {
             setStatus('ロボットに接続されていません', true);
@@ -558,6 +670,33 @@ const app = (() => {
         addMessage('system', `🤖 回転: ${angle}度`);
         await sendRobotCommand(commandData, key);
         setStatus(`${angle}度回転完了`);
+    }
+
+    async function executeRobotPenUp() {
+        const packetId = (++state.commandSequence) & 0xFF;
+        const commandData = setPenPosition(0, packetId);
+        const key = `2-0-${packetId}`;
+        addMessage('system', '🤖 ペンを上げる');
+        await sendRobotCommand(commandData, key);
+        setStatus('ペンを上げました');
+    }
+
+    async function executeRobotPenDown() {
+        const packetId = (++state.commandSequence) & 0xFF;
+        const commandData = setPenPosition(1, packetId);
+        const key = `2-0-${packetId}`;
+        addMessage('system', '🤖 ペンを下げる');
+        await sendRobotCommand(commandData, key);
+        setStatus('ペンを下げました');
+    }
+
+    async function executeRobotPlayNote(frequency, duration) {
+        const packetId = (++state.commandSequence) & 0xFF;
+        const commandData = setSound(frequency, duration, packetId);
+        const key = `5-0-${packetId}`;
+        addMessage('system', `🤖 音を鳴らす: ${frequency}Hz ${duration}ms`);
+        await sendRobotCommand(commandData, key);
+        setStatus(`${frequency}Hz ${duration}ms の音を鳴らしました`);
     }
 
     init();
