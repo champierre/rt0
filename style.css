@@ -32,6 +32,29 @@ h1 {
     font-size: 24px;
 }
 
+.header-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.robot-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.robot-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+.robot-btn.connected {
+    background: #28a745;
+}
+
 .settings-btn {
     background: rgba(255,255,255,0.2);
     border: none;
@@ -69,6 +92,16 @@ h1 {
 .message.assistant {
     background: white;
     border: 1px solid #e0e0e0;
+}
+
+.message.system {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    font-size: 14px;
+    max-width: 60%;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .controls {

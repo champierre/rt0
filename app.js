@@ -3,17 +3,29 @@ const app = (() => {
     const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
     const MODEL = 'gpt-4o-mini';
 
+    // Root robot Bluetooth UUIDs
+    const ROOT_SERVICE_UUID = '48c5d828-ac2a-442d-97a3-0c9822b04979';
+    const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const TX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+    const RX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
     let state = {
         isRecording: false,
         isSpeaking: false,
         recognition: null,
-        conversationHistory: []
+        conversationHistory: [],
+        isRobotConnected: false,
+        device: null,
+        txCharacteristic: null,
+        rxCharacteristic: null,
+        commandResolvers: new Map()
     };
 
     const elements = {
         chatContainer: document.getElementById('chatContainer'),
         status: document.getElementById('status'),
         micBtn: document.getElementById('micBtn'),
+        robotBtn: document.getElementById('robotBtn'),
         apiKeyInput: document.getElementById('apiKey'),
         settingsModal: document.getElementById('settingsModal')
     };
@@ -50,12 +62,19 @@ const app = (() => {
 
         state.recognition.onerror = (event) => {
             if (event.error === 'aborted') {
-                // ユーザーが停止した場合は正常終了として扱う
                 return;
             }
             setStatus(`エラー: ${event.error}`, true);
-            if (state.isRecording) {
-                setTimeout(() => state.isRecording && state.recognition.start(), 100);
+            if (state.isRecording && event.error !== 'no-speech') {
+                setTimeout(() => {
+                    if (state.isRecording && !state.isSpeaking) {
+                        try {
+                            state.recognition.start();
+                        } catch (e) {
+                            console.error('Recognition restart error:', e);
+                        }
+                    }
+                }, 100);
             }
         };
 
@@ -63,9 +82,13 @@ const app = (() => {
             if (state.isRecording && !state.isSpeaking) {
                 setTimeout(() => {
                     if (state.isRecording && !state.isSpeaking) {
-                        state.recognition.start();
+                        try {
+                            state.recognition.start();
+                        } catch (e) {
+                            console.error('Recognition restart error:', e);
+                        }
                     }
-                }, 100);
+                }, 300);
             }
         };
     }
@@ -104,6 +127,43 @@ const app = (() => {
         setStatus('マイクボタンを押して話しかけてください');
     }
 
+    const tools = [
+        {
+            type: 'function',
+            function: {
+                name: 'move_robot_forward',
+                description: 'ロボットを指定した距離（ミリメートル）だけ前進させます',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        distance: {
+                            type: 'number',
+                            description: '前進する距離（ミリメートル）。デフォルトは100mm'
+                        }
+                    },
+                    required: []
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'rotate_robot',
+                description: 'ロボットを指定した角度（度）だけ回転させます。正の値で時計回り、負の値で反時計回り',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        angle: {
+                            type: 'number',
+                            description: '回転する角度（度）。正の値で時計回り、負の値で反時計回り。デフォルトは90度'
+                        }
+                    },
+                    required: []
+                }
+            }
+        }
+    ];
+
     async function sendToOpenAI(text) {
         const apiKey = localStorage.getItem(API_KEY_STORAGE);
         if (!apiKey) {
@@ -124,7 +184,8 @@ const app = (() => {
                 body: JSON.stringify({
                     model: MODEL,
                     messages: state.conversationHistory,
-                    temperature: 0.7
+                    temperature: 0.7,
+                    tools: tools
                 })
             });
 
@@ -133,11 +194,63 @@ const app = (() => {
             }
 
             const data = await response.json();
-            const assistantMessage = data.choices[0].message.content;
+            const message = data.choices[0].message;
 
-            state.conversationHistory.push({ role: 'assistant', content: assistantMessage });
-            addMessage('assistant', assistantMessage);
-            speak(assistantMessage);
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                state.conversationHistory.push(message);
+
+                // 最初のtool_callのみ実行
+                const toolCall = message.tool_calls[0];
+
+                if (toolCall.function.name === 'move_robot_forward') {
+                    const args = JSON.parse(toolCall.function.arguments);
+                    const distance = args.distance || 100;
+                    await executeRobotForward(distance);
+
+                    state.conversationHistory.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: `ロボットを${distance}mm前進させました`
+                    });
+                } else if (toolCall.function.name === 'rotate_robot') {
+                    const args = JSON.parse(toolCall.function.arguments);
+                    const angle = args.angle || 90;
+                    await executeRobotRotate(angle);
+
+                    state.conversationHistory.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: `ロボットを${angle}度回転させました`
+                    });
+                }
+
+                // 2回目のAPI呼び出しで応答を取得
+                const finalResponse = await fetch(OPENAI_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: MODEL,
+                        messages: state.conversationHistory,
+                        temperature: 0.7,
+                        tools: tools
+                    })
+                });
+
+                const finalData = await finalResponse.json();
+                const assistantMessage = finalData.choices[0].message.content;
+
+                state.conversationHistory.push({ role: 'assistant', content: assistantMessage });
+                addMessage('assistant', assistantMessage);
+                speak(assistantMessage);
+            } else {
+                const assistantMessage = message.content;
+                state.conversationHistory.push({ role: 'assistant', content: assistantMessage });
+                addMessage('assistant', assistantMessage);
+                speak(assistantMessage);
+            }
 
         } catch (error) {
             setStatus(`エラー: ${error.message}`, true);
@@ -156,8 +269,20 @@ const app = (() => {
 
         utterance.onend = () => {
             state.isSpeaking = false;
-            setStatus('聴いています...');
-            if (state.isRecording) state.recognition.start();
+            if (state.isRecording) {
+                setStatus('聴いています...');
+                state.recognition.start();
+            } else {
+                setStatus('マイクボタンを押して話しかけてください');
+            }
+        };
+
+        utterance.onerror = () => {
+            state.isSpeaking = false;
+            if (state.isRecording) {
+                setStatus('聴いています...');
+                state.recognition.start();
+            }
         };
 
         speechSynthesis.speak(utterance);
@@ -201,6 +326,204 @@ const app = (() => {
         }
     }
 
+    async function toggleRobot() {
+        if (state.isRobotConnected) {
+            await disconnectRobot();
+        } else {
+            await connectRobot();
+        }
+    }
+
+    async function connectRobot() {
+        try {
+            if (!navigator.bluetooth) {
+                throw new Error('このブラウザはWeb Bluetooth APIに対応していません');
+            }
+
+            setStatus('ロボットを検索中...');
+
+            state.device = await navigator.bluetooth.requestDevice({
+                filters: [{ services: [ROOT_SERVICE_UUID] }],
+                optionalServices: [UART_SERVICE_UUID]
+            });
+
+            setStatus('接続中...');
+            const server = await state.device.gatt.connect();
+
+            const service = await server.getPrimaryService(UART_SERVICE_UUID);
+            state.txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
+            state.rxCharacteristic = await service.getCharacteristic(RX_CHAR_UUID);
+
+            await state.rxCharacteristic.startNotifications();
+            state.rxCharacteristic.addEventListener('characteristicvaluechanged', handleRobotResponse);
+
+            state.isRobotConnected = true;
+            elements.robotBtn.classList.add('connected');
+            elements.robotBtn.textContent = '🤖 切断';
+            setStatus('ロボットに接続しました');
+
+            state.device.addEventListener('gattserverdisconnected', onDisconnected);
+        } catch (error) {
+            setStatus(`接続エラー: ${error.message}`, true);
+        }
+    }
+
+    async function disconnectRobot() {
+        try {
+            if (state.device && state.device.gatt.connected) {
+                if (state.rxCharacteristic) {
+                    state.rxCharacteristic.removeEventListener('characteristicvaluechanged', handleRobotResponse);
+                    await state.rxCharacteristic.stopNotifications();
+                }
+
+                state.device.gatt.disconnect();
+            }
+
+            state.isRobotConnected = false;
+            state.device = null;
+            state.txCharacteristic = null;
+            state.rxCharacteristic = null;
+            elements.robotBtn.classList.remove('connected');
+            elements.robotBtn.textContent = '🤖 接続';
+            setStatus('ロボットから切断しました');
+        } catch (error) {
+            setStatus(`切断エラー: ${error.message}`, true);
+        }
+    }
+
+    function onDisconnected() {
+        state.isRobotConnected = false;
+        state.device = null;
+        state.txCharacteristic = null;
+        state.rxCharacteristic = null;
+        elements.robotBtn.classList.remove('connected');
+        elements.robotBtn.textContent = '🤖 接続';
+        setStatus('ロボットが切断されました');
+    }
+
+    function handleRobotResponse(event) {
+        const value = event.target.value;
+        const response = new Uint8Array(value.buffer);
+
+        if (response.length >= 2) {
+            const key = `${response[0]}-${response[1]}`;
+            const resolver = state.commandResolvers.get(key);
+            if (resolver) {
+                resolver();
+                state.commandResolvers.delete(key);
+            }
+        }
+    }
+
+    // CRC8 calculation
+    function generateCrc8Table() {
+        const polynomial = 0x07;
+        const table = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) {
+            let crc = i;
+            for (let j = 0; j < 8; j++) {
+                if (crc & 0x80) {
+                    crc = (crc << 1) ^ polynomial;
+                } else {
+                    crc <<= 1;
+                }
+            }
+            table[i] = crc & 0xFF;
+        }
+        return table;
+    }
+
+    const crcTable = generateCrc8Table();
+
+    function crc8(data) {
+        let crc = 0x00;
+        for (let i = 0; i < data.length; i++) {
+            crc = crcTable[(crc ^ data[i]) & 0xFF];
+        }
+        return crc;
+    }
+
+    function appendCrc(value) {
+        const newValue = new Uint8Array(value.length + 1);
+        newValue.set(value);
+        newValue[19] = crc8(value);
+        return newValue;
+    }
+
+    // Robot command: forward
+    function setDistance(distance) {
+        const arr = new Uint8Array(19);
+        arr[0] = 1;
+        arr[1] = 8;
+        arr[2] = 0;
+
+        const value = distance | 0;
+        arr[3] = (value >> 24) & 0xFF;
+        arr[4] = (value >> 16) & 0xFF;
+        arr[5] = (value >> 8) & 0xFF;
+        arr[6] = value & 0xFF;
+        return arr;
+    }
+
+    // Robot command: rotate
+    function setAngle(angle) {
+        const arr = new Uint8Array(19);
+        arr[0] = 1;
+        arr[1] = 12;
+        arr[2] = 0;
+
+        const angleValue = (angle * 10) | 0;
+        arr[3] = (angleValue >> 24) & 0xFF;
+        arr[4] = (angleValue >> 16) & 0xFF;
+        arr[5] = (angleValue >> 8) & 0xFF;
+        arr[6] = angleValue & 0xFF;
+        return arr;
+    }
+
+    async function sendRobotCommand(commandData, key, commandName) {
+        if (!state.txCharacteristic) {
+            setStatus('ロボットに接続されていません', true);
+            throw new Error('Not connected to Root robot');
+        }
+
+        return new Promise(async (resolve, reject) => {
+            state.commandResolvers.set(key, () => {
+                resolve({ status: 'completed' });
+            });
+
+            const commandWithCrc = appendCrc(commandData);
+
+            try {
+                await state.txCharacteristic.writeValue(commandWithCrc);
+
+                setTimeout(() => {
+                    if (state.commandResolvers.has(key)) {
+                        state.commandResolvers.delete(key);
+                        reject(new Error('Command timeout'));
+                    }
+                }, 10000);
+            } catch (error) {
+                state.commandResolvers.delete(key);
+                setStatus(`コマンド送信エラー: ${error.message}`, true);
+                reject(error);
+            }
+        });
+    }
+
+    async function executeRobotForward(distance) {
+        const commandData = setDistance(distance);
+        addMessage('system', `🤖 前進: ${distance}mm`);
+        await sendRobotCommand(commandData, '1-8', 'Forward command');
+        setStatus(`${distance}mm前進完了`);
+    }
+
+    async function executeRobotRotate(angle) {
+        const commandData = setAngle(angle);
+        addMessage('system', `🤖 回転: ${angle}度`);
+        await sendRobotCommand(commandData, '1-12', 'Rotate command');
+        setStatus(`${angle}度回転完了`);
+    }
+
     init();
 
     return {
@@ -208,6 +531,7 @@ const app = (() => {
         clearChat,
         openSettings,
         closeSettings,
-        saveSettings
+        saveSettings,
+        toggleRobot
     };
 })();
