@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音声対話AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>音声対話AI</h1>
+            <button class="settings-btn" onclick="app.openSettings()">⚙️ 設定</button>
+        </div>
+        <div class="chat-container" id="chatContainer"></div>
+        <div class="status" id="status">マイクボタンを押して話しかけてください</div>
+        <div class="controls">
+            <button class="mic-btn" id="micBtn" onclick="app.toggleRecording()">🎤</button>
+            <button class="clear-btn" onclick="app.clearChat()">会話をクリア</button>
+        </div>
+    </div>
+
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <h2>設定</h2>
+            <div class="form-group">
+                <label for="apiKey">OpenAI APIキー</label>
+                <input type="password" id="apiKey" placeholder="sk-...">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="app.closeSettings()">キャンセル</button>
+                <button class="btn btn-primary" onclick="app.saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
