@@ -20,7 +20,8 @@ const app = (() => {
         txCharacteristic: null,
         rxCharacteristic: null,
         commandResolvers: new Map(),
-        commandSequence: 0
+        commandSequence: 0,
+        voiceEnabled: false
     };
 
     const elements = {
@@ -28,6 +29,7 @@ const app = (() => {
         status: document.getElementById('status'),
         micBtn: document.getElementById('micBtn'),
         robotBtn: document.getElementById('robotBtn'),
+        voiceBtn: document.getElementById('voiceBtn'),
         apiKeyInput: document.getElementById('apiKey'),
         settingsModal: document.getElementById('settingsModal')
     };
@@ -391,6 +393,11 @@ const app = (() => {
     }
 
     function speak(text) {
+        if (!state.voiceEnabled) {
+            finishSpeaking();
+            return;
+        }
+
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'ja-JP';
 
@@ -699,6 +706,11 @@ const app = (() => {
         setStatus(`${frequency}Hz ${duration}ms の音を鳴らしました`);
     }
 
+    function toggleVoice() {
+        state.voiceEnabled = !state.voiceEnabled;
+        elements.voiceBtn.textContent = state.voiceEnabled ? '🔊 音声ON' : '🔇 音声OFF';
+    }
+
     init();
 
     return {
@@ -707,6 +719,7 @@ const app = (() => {
         openSettings,
         closeSettings,
         saveSettings,
-        toggleRobot
+        toggleRobot,
+        toggleVoice
     };
 })();
