@@ -35,6 +35,7 @@ const app = (() => {
     function init() {
         loadApiKey();
         setupSpeechRecognition();
+        setupMicButton();
     }
 
     function loadApiKey() {
@@ -70,26 +71,48 @@ const app = (() => {
                 return;
             }
             setStatus(`エラー: ${event.error}`, true);
-            if (state.isRecording) {
-                setTimeout(() => restartRecognitionIfNeeded(), 100);
-            }
         };
 
         state.recognition.onend = () => {
-            if (state.isRecording && !state.isSpeaking && !state.isProcessing) {
-                setTimeout(() => restartRecognitionIfNeeded(), 300);
+            if (state.isRecording) {
+                stopRecording();
             }
         };
     }
 
-    function restartRecognitionIfNeeded() {
-        if (state.isRecording && !state.isSpeaking && !state.isProcessing) {
-            try {
-                state.recognition.start();
-            } catch (e) {
-                // Ignore restart errors
+    function setupMicButton() {
+        elements.micBtn.addEventListener('mousedown', () => {
+            if (!state.isProcessing) {
+                startRecording();
             }
-        }
+        });
+
+        elements.micBtn.addEventListener('mouseup', () => {
+            if (state.isRecording && !state.isProcessing) {
+                // 音声認識は自動的に終了するまで待つ
+            }
+        });
+
+        elements.micBtn.addEventListener('mouseleave', () => {
+            if (state.isRecording && !state.isProcessing) {
+                // 音声認識は自動的に終了するまで待つ
+            }
+        });
+
+        // タッチデバイス対応
+        elements.micBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (!state.isProcessing) {
+                startRecording();
+            }
+        });
+
+        elements.micBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (state.isRecording && !state.isProcessing) {
+                // 音声認識は自動的に終了するまで待つ
+            }
+        });
     }
 
     function toggleRecording() {
@@ -106,15 +129,22 @@ const app = (() => {
     }
 
     function startRecording() {
+        if (!state.recognition) {
+            return;
+        }
         const apiKey = localStorage.getItem(API_KEY_STORAGE);
         if (!apiKey) {
             setStatus('APIキーが設定されていません', true);
             openSettings();
             return;
         }
-        state.recognition.start();
-        state.isRecording = true;
-        elements.micBtn.classList.add('recording');
+        try {
+            state.recognition.start();
+            state.isRecording = true;
+            elements.micBtn.classList.add('recording');
+        } catch (e) {
+            // Ignore if already started
+        }
     }
 
     function stopRecording() {
@@ -171,6 +201,7 @@ const app = (() => {
         }
 
         state.isProcessing = true;
+        elements.micBtn.disabled = true;
         setStatus('考えています...');
         state.conversationHistory.push({ role: 'user', content: text });
 
@@ -235,17 +266,15 @@ const app = (() => {
             } else {
                 state.conversationHistory.push({ role: 'assistant', content: '' });
                 state.isProcessing = false;
-                if (state.isRecording) {
-                    setStatus('聴いています...');
-                } else {
-                    setStatus('マイクボタンを押して話しかけてください');
-                }
+                elements.micBtn.disabled = false;
+                setStatus('マイクボタンを押して話しかけてください');
             }
 
         } catch (error) {
             setStatus(`エラー: ${error.message}`, true);
             state.conversationHistory.pop();
             state.isProcessing = false;
+            elements.micBtn.disabled = false;
         }
     }
 
@@ -297,16 +326,8 @@ const app = (() => {
     function finishSpeaking() {
         state.isSpeaking = false;
         state.isProcessing = false;
-        if (state.isRecording) {
-            setStatus('聴いています...');
-            try {
-                state.recognition.start();
-            } catch (e) {
-                // Ignore restart errors
-            }
-        } else {
-            setStatus('マイクボタンを押して話しかけてください');
-        }
+        elements.micBtn.disabled = false;
+        setStatus('マイクボタンを押して話しかけてください');
     }
 
     function addMessage(role, content) {

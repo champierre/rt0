@@ -124,8 +124,14 @@ h1 {
     transition: all 0.3s;
 }
 
-.mic-btn:hover {
+.mic-btn:hover:not(:disabled) {
     background: #218838;
+}
+
+.mic-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .mic-btn.recording {
