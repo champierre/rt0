@@ -12,13 +12,15 @@ const app = (() => {
     let state = {
         isRecording: false,
         isSpeaking: false,
+        isProcessing: false,
         recognition: null,
         conversationHistory: [],
         isRobotConnected: false,
         device: null,
         txCharacteristic: null,
         rxCharacteristic: null,
-        commandResolvers: new Map()
+        commandResolvers: new Map(),
+        commandSequence: 0
     };
 
     const elements = {
@@ -55,42 +57,39 @@ const app = (() => {
         state.recognition.onstart = () => setStatus('聴いています...');
 
         state.recognition.onresult = async (event) => {
+            if (state.isProcessing) {
+                return;
+            }
             const transcript = event.results[0][0].transcript;
             addMessage('user', transcript);
             await sendToOpenAI(transcript);
         };
 
         state.recognition.onerror = (event) => {
-            if (event.error === 'aborted') {
+            if (event.error === 'aborted' || event.error === 'no-speech') {
                 return;
             }
             setStatus(`エラー: ${event.error}`, true);
-            if (state.isRecording && event.error !== 'no-speech') {
-                setTimeout(() => {
-                    if (state.isRecording && !state.isSpeaking) {
-                        try {
-                            state.recognition.start();
-                        } catch (e) {
-                            console.error('Recognition restart error:', e);
-                        }
-                    }
-                }, 100);
+            if (state.isRecording) {
+                setTimeout(() => restartRecognitionIfNeeded(), 100);
             }
         };
 
         state.recognition.onend = () => {
-            if (state.isRecording && !state.isSpeaking) {
-                setTimeout(() => {
-                    if (state.isRecording && !state.isSpeaking) {
-                        try {
-                            state.recognition.start();
-                        } catch (e) {
-                            console.error('Recognition restart error:', e);
-                        }
-                    }
-                }, 300);
+            if (state.isRecording && !state.isSpeaking && !state.isProcessing) {
+                setTimeout(() => restartRecognitionIfNeeded(), 300);
             }
         };
+    }
+
+    function restartRecognitionIfNeeded() {
+        if (state.isRecording && !state.isSpeaking && !state.isProcessing) {
+            try {
+                state.recognition.start();
+            } catch (e) {
+                // Ignore restart errors
+            }
+        }
     }
 
     function toggleRecording() {
@@ -171,6 +170,7 @@ const app = (() => {
             return;
         }
 
+        state.isProcessing = true;
         setStatus('考えています...');
         state.conversationHistory.push({ role: 'user', content: text });
 
@@ -193,39 +193,23 @@ const app = (() => {
                 throw new Error(`API error: ${response.status}`);
             }
 
-            const data = await response.json();
-            const message = data.choices[0].message;
+            let data = await response.json();
+            let message = data.choices[0].message;
 
-            if (message.tool_calls && message.tool_calls.length > 0) {
+            // tool_callsがある限り実行を続ける（最大10回）
+            let loopCount = 0;
+            const maxLoops = 10;
+            while (message.tool_calls && message.tool_calls.length > 0 && loopCount < maxLoops) {
+                loopCount++;
                 state.conversationHistory.push(message);
 
-                // 最初のtool_callのみ実行
-                const toolCall = message.tool_calls[0];
-
-                if (toolCall.function.name === 'move_robot_forward') {
-                    const args = JSON.parse(toolCall.function.arguments);
-                    const distance = args.distance || 100;
-                    await executeRobotForward(distance);
-
-                    state.conversationHistory.push({
-                        role: 'tool',
-                        tool_call_id: toolCall.id,
-                        content: `ロボットを${distance}mm前進させました`
-                    });
-                } else if (toolCall.function.name === 'rotate_robot') {
-                    const args = JSON.parse(toolCall.function.arguments);
-                    const angle = args.angle || 90;
-                    await executeRobotRotate(angle);
-
-                    state.conversationHistory.push({
-                        role: 'tool',
-                        tool_call_id: toolCall.id,
-                        content: `ロボットを${angle}度回転させました`
-                    });
+                // すべてのtool_callsを順次実行
+                for (const toolCall of message.tool_calls) {
+                    await executeToolCall(toolCall);
                 }
 
-                // 2回目のAPI呼び出しで応答を取得
-                const finalResponse = await fetch(OPENAI_API_URL, {
+                // 次のAPI呼び出し
+                const nextResponse = await fetch(OPENAI_API_URL, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -239,22 +223,59 @@ const app = (() => {
                     })
                 });
 
-                const finalData = await finalResponse.json();
-                const assistantMessage = finalData.choices[0].message.content;
+                data = await nextResponse.json();
+                message = data.choices[0].message;
+            }
 
-                state.conversationHistory.push({ role: 'assistant', content: assistantMessage });
-                addMessage('assistant', assistantMessage);
-                speak(assistantMessage);
+            // 最終的な応答メッセージ
+            if (message.content) {
+                state.conversationHistory.push({ role: 'assistant', content: message.content });
+                addMessage('assistant', message.content);
+                speak(message.content);
             } else {
-                const assistantMessage = message.content;
-                state.conversationHistory.push({ role: 'assistant', content: assistantMessage });
-                addMessage('assistant', assistantMessage);
-                speak(assistantMessage);
+                state.conversationHistory.push({ role: 'assistant', content: '' });
+                state.isProcessing = false;
+                if (state.isRecording) {
+                    setStatus('聴いています...');
+                } else {
+                    setStatus('マイクボタンを押して話しかけてください');
+                }
             }
 
         } catch (error) {
             setStatus(`エラー: ${error.message}`, true);
             state.conversationHistory.pop();
+            state.isProcessing = false;
+        }
+    }
+
+    async function executeToolCall(toolCall) {
+        if (toolCall.function.name === 'move_robot_forward') {
+            const args = JSON.parse(toolCall.function.arguments);
+            const distance = args.distance || 100;
+            await executeRobotForward(distance);
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `ロボットを${distance}mm前進させました`
+            });
+        } else if (toolCall.function.name === 'rotate_robot') {
+            const args = JSON.parse(toolCall.function.arguments);
+            const angle = args.angle || 90;
+            await executeRobotRotate(angle);
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `ロボットを${angle}度回転させました`
+            });
+        } else {
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `Unknown tool: ${toolCall.function.name}`
+            });
         }
     }
 
@@ -267,25 +288,25 @@ const app = (() => {
             setStatus('話しています...');
         };
 
-        utterance.onend = () => {
-            state.isSpeaking = false;
-            if (state.isRecording) {
-                setStatus('聴いています...');
-                state.recognition.start();
-            } else {
-                setStatus('マイクボタンを押して話しかけてください');
-            }
-        };
-
-        utterance.onerror = () => {
-            state.isSpeaking = false;
-            if (state.isRecording) {
-                setStatus('聴いています...');
-                state.recognition.start();
-            }
-        };
+        utterance.onend = () => finishSpeaking();
+        utterance.onerror = () => finishSpeaking();
 
         speechSynthesis.speak(utterance);
+    }
+
+    function finishSpeaking() {
+        state.isSpeaking = false;
+        state.isProcessing = false;
+        if (state.isRecording) {
+            setStatus('聴いています...');
+            try {
+                state.recognition.start();
+            } catch (e) {
+                // Ignore restart errors
+            }
+        } else {
+            setStatus('マイクボタンを押して話しかけてください');
+        }
     }
 
     function addMessage(role, content) {
@@ -405,8 +426,8 @@ const app = (() => {
         const value = event.target.value;
         const response = new Uint8Array(value.buffer);
 
-        if (response.length >= 2) {
-            const key = `${response[0]}-${response[1]}`;
+        if (response.length >= 3) {
+            const key = `${response[0]}-${response[1]}-${response[2]}`;
             const resolver = state.commandResolvers.get(key);
             if (resolver) {
                 resolver();
@@ -450,14 +471,11 @@ const app = (() => {
         return newValue;
     }
 
-    // Robot command: forward
-    function setDistance(distance) {
+    function createRobotCommand(deviceId, commandId, packetId, value) {
         const arr = new Uint8Array(19);
-        arr[0] = 1;
-        arr[1] = 8;
-        arr[2] = 0;
-
-        const value = distance | 0;
+        arr[0] = deviceId;
+        arr[1] = commandId;
+        arr[2] = packetId & 0xFF;
         arr[3] = (value >> 24) & 0xFF;
         arr[4] = (value >> 16) & 0xFF;
         arr[5] = (value >> 8) & 0xFF;
@@ -465,22 +483,15 @@ const app = (() => {
         return arr;
     }
 
-    // Robot command: rotate
-    function setAngle(angle) {
-        const arr = new Uint8Array(19);
-        arr[0] = 1;
-        arr[1] = 12;
-        arr[2] = 0;
-
-        const angleValue = (angle * 10) | 0;
-        arr[3] = (angleValue >> 24) & 0xFF;
-        arr[4] = (angleValue >> 16) & 0xFF;
-        arr[5] = (angleValue >> 8) & 0xFF;
-        arr[6] = angleValue & 0xFF;
-        return arr;
+    function setDistance(distance, packetId) {
+        return createRobotCommand(1, 8, packetId, distance | 0);
     }
 
-    async function sendRobotCommand(commandData, key, commandName) {
+    function setAngle(angle, packetId) {
+        return createRobotCommand(1, 12, packetId, (angle * 10) | 0);
+    }
+
+    async function sendRobotCommand(commandData, key) {
         if (!state.txCharacteristic) {
             setStatus('ロボットに接続されていません', true);
             throw new Error('Not connected to Root robot');
@@ -511,16 +522,20 @@ const app = (() => {
     }
 
     async function executeRobotForward(distance) {
-        const commandData = setDistance(distance);
+        const packetId = (++state.commandSequence) & 0xFF;
+        const commandData = setDistance(distance, packetId);
+        const key = `1-8-${packetId}`;
         addMessage('system', `🤖 前進: ${distance}mm`);
-        await sendRobotCommand(commandData, '1-8', 'Forward command');
+        await sendRobotCommand(commandData, key);
         setStatus(`${distance}mm前進完了`);
     }
 
     async function executeRobotRotate(angle) {
-        const commandData = setAngle(angle);
+        const packetId = (++state.commandSequence) & 0xFF;
+        const commandData = setAngle(angle, packetId);
+        const key = `1-12-${packetId}`;
         addMessage('system', `🤖 回転: ${angle}度`);
-        await sendRobotCommand(commandData, '1-12', 'Rotate command');
+        await sendRobotCommand(commandData, key);
         setStatus(`${angle}度回転完了`);
     }
 
