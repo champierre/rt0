@@ -49,6 +49,10 @@ const app = (() => {
         };
 
         state.recognition.onerror = (event) => {
+            if (event.error === 'aborted') {
+                // ユーザーが停止した場合は正常終了として扱う
+                return;
+            }
             setStatus(`エラー: ${event.error}`, true);
             if (state.isRecording) {
                 setTimeout(() => state.isRecording && state.recognition.start(), 100);
