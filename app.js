@@ -84,14 +84,14 @@ const app = (() => {
         const apiKey = localStorage.getItem(API_KEY_STORAGE);
         if (apiKey) elements.apiKeyInput.value = apiKey;
 
-        const savedModel = localStorage.getItem(MODEL_STORAGE) || 'gpt-4.1-mini';
+        const savedModel = localStorage.getItem(MODEL_STORAGE) || 'gpt-4o-mini';
         if (elements.modelSelect) {
             elements.modelSelect.value = savedModel;
         }
     }
 
     function getSelectedModel() {
-        return localStorage.getItem(MODEL_STORAGE) || 'gpt-4.1-mini';
+        return localStorage.getItem(MODEL_STORAGE) || 'gpt-4o-mini';
     }
 
     function setupSpeechRecognition() {
