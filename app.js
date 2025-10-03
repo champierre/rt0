@@ -47,7 +47,7 @@ const app = (() => {
         state.conversationHistory = [
             {
                 role: 'system',
-                content: 'あなたはロボットを制御するアシスタントです。ユーザーの指示に従ってロボットを動かしてください。\n\n重要な注意事項：\n\n【描画について】\n- 絵や図形を描く場合は、必ず最初にpen_downツールを使ってペンを下ろしてください\n- 描画が完了したら、必ずpen_upツールを使ってペンを上げてください\n- ペンを下ろさずに移動すると、線が描かれません\n\n【音楽演奏について】\n- 曲を演奏する場合は、play_noteツールを連続して呼び出してください\n- 各音符の周波数（Hz）と長さ（ミリ秒）を正確に指定してください\n- 主要な音階の周波数: ド(261Hz), レ(294Hz), ミ(330Hz), ファ(349Hz), ソ(392Hz), ラ(440Hz), シ(494Hz), 高いド(523Hz)\n- 一般的な音符の長さ: 全音符(2000ms), 2分音符(1000ms), 4分音符(500ms), 8分音符(250ms)\n- 音符と音符の間には短い休符(50-100ms程度の無音)を入れると自然な演奏になります\n- 有名な童謡や簡単なメロディーの楽譜を知っている場合は、正確に再現してください'
+                content: 'あなたはロボットを制御するアシスタントです。ユーザーの指示に従ってロボットを動かしてください。\n\n重要な注意事項：\n\n【描画について】\n- 絵や図形を描く場合は、必ず最初にpen_downツールを使ってペンを下ろしてください\n- 描画が完了したら、必ずpen_upツールを使ってペンを上げてください\n- ペンを下ろさずに移動すると、線が描かれません\n\n【音楽演奏について】\n- 曲を演奏する場合は、play_melodyツールを使用してください（推奨）\n- play_melodyは音符の配列を一度に指定できるため、効率的で確実です\n- 各音符は {frequency: 周波数(Hz), duration: 長さ(ms)} の形式で指定します\n- 主要な音階の周波数: ド(261Hz), レ(294Hz), ミ(330Hz), ファ(349Hz), ソ(392Hz), ラ(440Hz), シ(494Hz), 高いド(523Hz)\n- 一般的な音符の長さ: 全音符(2000ms), 2分音符(1000ms), 4分音符(500ms), 8分音符(250ms)\n- 休符は {frequency: 0, duration: 休符の長さ(ms)} で表現します\n- 有名な童謡や簡単なメロディーの楽譜を知っている場合は、正確に再現してください\n- 単音を鳴らす場合はplay_noteツールを使用してください'
             }
         ];
     }
@@ -257,6 +257,37 @@ const app = (() => {
                     required: []
                 }
             }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'play_melody',
+                description: 'ロボットでメロディー（複数の音符の連続）を演奏します。曲を演奏する場合はこのツールを使用してください',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        notes: {
+                            type: 'array',
+                            description: '音符の配列。各音符は周波数(Hz)と長さ(ms)を持ちます。休符は周波数0で表現します',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    frequency: {
+                                        type: 'number',
+                                        description: '音の周波数（Hz）。休符の場合は0'
+                                    },
+                                    duration: {
+                                        type: 'number',
+                                        description: '音の長さ（ミリ秒）'
+                                    }
+                                },
+                                required: ['frequency', 'duration']
+                            }
+                        }
+                    },
+                    required: ['notes']
+                }
+            }
         }
     ];
 
@@ -392,6 +423,16 @@ const app = (() => {
                 role: 'tool',
                 tool_call_id: toolCall.id,
                 content: `${frequency}Hzの音を${duration}ms鳴らしました`
+            });
+        } else if (toolCall.function.name === 'play_melody') {
+            const args = JSON.parse(toolCall.function.arguments);
+            const notes = args.notes || [];
+            await executeRobotPlayMelody(notes);
+
+            state.conversationHistory.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `メロディーを演奏しました（${notes.length}音符）`
             });
         } else {
             state.conversationHistory.push({
@@ -720,6 +761,30 @@ const app = (() => {
         addMessage('system', `🤖 音を鳴らす: ${frequency}Hz ${duration}ms`);
         await sendRobotCommand(commandData, key);
         setStatus(`${frequency}Hz ${duration}ms の音を鳴らしました`);
+    }
+
+    async function executeRobotPlayMelody(notes) {
+        addMessage('system', `🎵 メロディーを演奏: ${notes.length}音符`);
+
+        for (let i = 0; i < notes.length; i++) {
+            const note = notes[i];
+            const frequency = note.frequency || 0;
+            const duration = note.duration || 500;
+
+            if (frequency > 0) {
+                // 通常の音符
+                const packetId = (++state.commandSequence) & 0xFF;
+                const commandData = setSound(frequency, duration, packetId);
+                const key = `5-0-${packetId}`;
+                await sendRobotCommand(commandData, key);
+                setStatus(`🎵 演奏中 ${i + 1}/${notes.length}`);
+            } else {
+                // 休符（周波数0）
+                await new Promise(resolve => setTimeout(resolve, duration));
+            }
+        }
+
+        setStatus(`メロディー演奏完了`);
     }
 
     function toggleVoice() {
