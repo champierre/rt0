@@ -721,7 +721,7 @@ const app = (() => {
 
     function toggleContinuous() {
         state.continuousMode = !state.continuousMode;
-        elements.continuousBtn.textContent = state.continuousMode ? '🔄 連続ON' : '⏸️ 連続OFF';
+        elements.continuousBtn.textContent = state.continuousMode ? '🗣️ ハンズフリーON' : '🗣️ ハンズフリーOFF';
 
         if (state.continuousMode && !state.isRecording && !state.isProcessing) {
             startRecording();
