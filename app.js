@@ -8,13 +8,13 @@ const app = (() => {
             name: 'GPT-4.1 mini',
             inputCost: 0.40,
             outputCost: 1.60,
-            description: '高速・高精度（推奨）'
+            description: '高速・高精度'
         },
         'gpt-4o-mini': {
             name: 'GPT-4o mini',
             inputCost: 0.15,
             outputCost: 0.60,
-            description: '低コスト'
+            description: '低コスト（推奨）'
         },
         'gpt-4o': {
             name: 'GPT-4o',
