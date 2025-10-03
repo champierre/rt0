@@ -88,8 +88,16 @@ const app = (() => {
         };
 
         state.recognition.onend = () => {
-            if (state.isRecording) {
-                stopRecording();
+            state.isRecording = false;
+            elements.micBtn.classList.remove('recording');
+
+            if (state.continuousMode && !state.isProcessing) {
+                // ハンズフリーモードでは音声認識を再開
+                setTimeout(() => {
+                    if (state.continuousMode && !state.isProcessing) {
+                        startRecording();
+                    }
+                }, 500);
             }
         };
     }
