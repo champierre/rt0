@@ -1,7 +1,34 @@
 const app = (() => {
     const API_KEY_STORAGE = 'openai_api_key';
+    const MODEL_STORAGE = 'openai_model';
     const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-    const MODEL = 'gpt-4.1-mini';
+
+    const MODELS = {
+        'gpt-4.1-mini': {
+            name: 'GPT-4.1 mini',
+            inputCost: 0.40,
+            outputCost: 1.60,
+            description: '高速・高精度（推奨）'
+        },
+        'gpt-4o-mini': {
+            name: 'GPT-4o mini',
+            inputCost: 0.15,
+            outputCost: 0.60,
+            description: '低コスト'
+        },
+        'gpt-4o': {
+            name: 'GPT-4o',
+            inputCost: 2.50,
+            outputCost: 10.00,
+            description: '最高性能'
+        },
+        'gpt-4.1': {
+            name: 'GPT-4.1',
+            inputCost: 10.00,
+            outputCost: 30.00,
+            description: '最高品質'
+        }
+    };
 
     // Root robot Bluetooth UUIDs
     const ROOT_SERVICE_UUID = '48c5d828-ac2a-442d-97a3-0c9822b04979';
@@ -33,6 +60,7 @@ const app = (() => {
         voiceBtn: document.getElementById('voiceBtn'),
         continuousBtn: document.getElementById('continuousBtn'),
         apiKeyInput: document.getElementById('apiKey'),
+        modelSelect: document.getElementById('modelSelect'),
         settingsModal: document.getElementById('settingsModal')
     };
 
@@ -55,6 +83,15 @@ const app = (() => {
     function loadApiKey() {
         const apiKey = localStorage.getItem(API_KEY_STORAGE);
         if (apiKey) elements.apiKeyInput.value = apiKey;
+
+        const savedModel = localStorage.getItem(MODEL_STORAGE) || 'gpt-4.1-mini';
+        if (elements.modelSelect) {
+            elements.modelSelect.value = savedModel;
+        }
+    }
+
+    function getSelectedModel() {
+        return localStorage.getItem(MODEL_STORAGE) || 'gpt-4.1-mini';
     }
 
     function setupSpeechRecognition() {
@@ -311,7 +348,7 @@ const app = (() => {
                     'Authorization': `Bearer ${apiKey}`
                 },
                 body: JSON.stringify({
-                    model: MODEL,
+                    model: getSelectedModel(),
                     messages: state.conversationHistory,
                     temperature: 0.7,
                     tools: tools
@@ -345,7 +382,7 @@ const app = (() => {
                         'Authorization': `Bearer ${apiKey}`
                     },
                     body: JSON.stringify({
-                        model: MODEL,
+                        model: getSelectedModel(),
                         messages: state.conversationHistory,
                         temperature: 0.7,
                         tools: tools
@@ -497,16 +534,30 @@ const app = (() => {
 
     function openSettings() {
         elements.settingsModal.classList.add('active');
+        updateModelInfo();
     }
 
     function closeSettings() {
         elements.settingsModal.classList.remove('active');
     }
 
+    function updateModelInfo() {
+        const selectedModel = elements.modelSelect.value;
+        const modelInfo = MODELS[selectedModel];
+
+        if (modelInfo) {
+            document.getElementById('inputCost').textContent = `$${modelInfo.inputCost.toFixed(2)}`;
+            document.getElementById('outputCost').textContent = `$${modelInfo.outputCost.toFixed(2)}`;
+        }
+    }
+
     function saveSettings() {
         const apiKey = elements.apiKeyInput.value.trim();
+        const model = elements.modelSelect.value;
+
         if (apiKey) {
             localStorage.setItem(API_KEY_STORAGE, apiKey);
+            localStorage.setItem(MODEL_STORAGE, model);
             closeSettings();
             setStatus('設定を保存しました');
         } else {
@@ -811,6 +862,7 @@ const app = (() => {
         openSettings,
         closeSettings,
         saveSettings,
+        updateModelInfo,
         toggleRobot,
         toggleVoice,
         toggleContinuous

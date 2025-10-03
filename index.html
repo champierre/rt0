@@ -32,6 +32,21 @@
                 <label for="apiKey">OpenAI APIキー</label>
                 <input type="password" id="apiKey" placeholder="sk-...">
             </div>
+            <div class="form-group">
+                <label for="modelSelect">モデル</label>
+                <select id="modelSelect" onchange="app.updateModelInfo()">
+                    <option value="gpt-4.1-mini">GPT-4.1 mini - 高速・高精度（推奨）</option>
+                    <option value="gpt-4o-mini">GPT-4o mini - 低コスト</option>
+                    <option value="gpt-4o">GPT-4o - 最高性能</option>
+                    <option value="gpt-4.1">GPT-4.1 - 最高品質</option>
+                </select>
+                <div class="model-info" id="modelInfo">
+                    <div class="cost-info">
+                        <span>入力: <strong id="inputCost">$0.40</strong>/1M tokens</span>
+                        <span>出力: <strong id="outputCost">$1.60</strong>/1M tokens</span>
+                    </div>
+                </div>
+            </div>
             <div class="modal-buttons">
                 <button class="btn btn-secondary" onclick="app.closeSettings()">キャンセル</button>
                 <button class="btn btn-primary" onclick="app.saveSettings()">保存</button>
