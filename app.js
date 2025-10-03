@@ -557,12 +557,11 @@ const app = (() => {
 
         if (apiKey) {
             localStorage.setItem(API_KEY_STORAGE, apiKey);
-            localStorage.setItem(MODEL_STORAGE, model);
-            closeSettings();
-            setStatus('設定を保存しました');
-        } else {
-            alert('APIキーを入力してください');
         }
+
+        localStorage.setItem(MODEL_STORAGE, model);
+        closeSettings();
+        setStatus('設定を保存しました');
     }
 
     async function toggleRobot() {
