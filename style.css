@@ -55,6 +55,34 @@ h1 {
     background: #28a745;
 }
 
+.continuous-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.continuous-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+.voice-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.voice-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
 .settings-btn {
     background: rgba(255,255,255,0.2);
     border: none;

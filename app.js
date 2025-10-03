@@ -21,7 +21,8 @@ const app = (() => {
         rxCharacteristic: null,
         commandResolvers: new Map(),
         commandSequence: 0,
-        voiceEnabled: false
+        voiceEnabled: false,
+        continuousMode: false
     };
 
     const elements = {
@@ -30,6 +31,7 @@ const app = (() => {
         micBtn: document.getElementById('micBtn'),
         robotBtn: document.getElementById('robotBtn'),
         voiceBtn: document.getElementById('voiceBtn'),
+        continuousBtn: document.getElementById('continuousBtn'),
         apiKeyInput: document.getElementById('apiKey'),
         settingsModal: document.getElementById('settingsModal')
     };
@@ -416,7 +418,13 @@ const app = (() => {
         state.isSpeaking = false;
         state.isProcessing = false;
         elements.micBtn.disabled = false;
-        setStatus('マイクボタンを押して話しかけてください');
+
+        if (state.continuousMode) {
+            setStatus('聴いています...');
+            startRecording();
+        } else {
+            setStatus('マイクボタンを押して話しかけてください');
+        }
     }
 
     function addMessage(role, content) {
@@ -711,6 +719,17 @@ const app = (() => {
         elements.voiceBtn.textContent = state.voiceEnabled ? '🔊 音声ON' : '🔇 音声OFF';
     }
 
+    function toggleContinuous() {
+        state.continuousMode = !state.continuousMode;
+        elements.continuousBtn.textContent = state.continuousMode ? '🔄 連続ON' : '⏸️ 連続OFF';
+
+        if (state.continuousMode && !state.isRecording && !state.isProcessing) {
+            startRecording();
+        } else if (!state.continuousMode && state.isRecording) {
+            stopRecording();
+        }
+    }
+
     init();
 
     return {
@@ -720,6 +739,7 @@ const app = (() => {
         closeSettings,
         saveSettings,
         toggleRobot,
-        toggleVoice
+        toggleVoice,
+        toggleContinuous
     };
 })();
